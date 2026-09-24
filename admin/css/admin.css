@@ -1,0 +1,399 @@
+/**
+ * Admin Stylesheet for Shaheen Central MXChat Sync
+ */
+
+.shaheen-wrap {
+	margin-top: 20px;
+	max-width: 1400px;
+}
+
+.shaheen-header {
+	margin-bottom: 20px;
+}
+
+.shaheen-header h1 {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	font-size: 24px;
+	font-weight: 700;
+	color: #1d2327;
+}
+
+.shaheen-badge-phase {
+	font-size: 12px;
+	font-weight: 600;
+	text-transform: uppercase;
+	padding: 4px 10px;
+	border-radius: 12px;
+	background-color: #2271b1;
+	color: #ffffff;
+}
+
+.shaheen-subtitle {
+	color: #646970;
+	font-size: 14px;
+	margin-top: 4px;
+}
+
+/* Alert Boxes */
+.shaheen-alert-box {
+	display: flex;
+	align-items: flex-start;
+	gap: 15px;
+	padding: 16px 20px;
+	border-radius: 6px;
+	margin-bottom: 20px;
+	border-left: 4px solid #2271b1;
+	background: #f0f6fc;
+}
+
+.shaheen-alert-icon .dashicons {
+	font-size: 26px;
+	width: 26px;
+	height: 26px;
+	color: #2271b1;
+}
+
+.shaheen-alert-content {
+	font-size: 14px;
+	line-height: 1.5;
+	color: #1d2327;
+}
+
+/* Tab Wrapper */
+.shaheen-tab-wrapper {
+	margin-bottom: 20px;
+}
+
+.shaheen-tab-wrapper .nav-tab {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-weight: 500;
+}
+
+.shaheen-count-bubble {
+	display: inline-block;
+	background: #dba617;
+	color: #ffffff;
+	font-size: 11px;
+	font-weight: 700;
+	padding: 1px 7px;
+	border-radius: 10px;
+	margin-left: 4px;
+}
+
+.shaheen-count-bubble-error {
+	display: inline-block;
+	background: #d63638;
+	color: #ffffff;
+	font-size: 11px;
+	font-weight: 700;
+	padding: 1px 7px;
+	border-radius: 10px;
+	margin-left: 4px;
+}
+
+/* Cards */
+.shaheen-card {
+	background: #ffffff;
+	border: 1px solid #c3c4c7;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+	border-radius: 6px;
+	padding: 24px;
+	margin-bottom: 24px;
+}
+
+.shaheen-card-header-flex {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+/* Dashboard Grid */
+.shaheen-dashboard-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	gap: 16px;
+	margin-bottom: 24px;
+}
+
+.shaheen-stat-card {
+	padding: 20px;
+	text-align: center;
+	margin-bottom: 0;
+	border-top: 3px solid #2271b1;
+}
+
+.shaheen-stat-num {
+	font-size: 26px;
+	font-weight: 700;
+	color: #1d2327;
+	line-height: 1.2;
+}
+
+.shaheen-stat-label {
+	font-size: 12px;
+	font-weight: 600;
+	color: #646970;
+	text-transform: uppercase;
+	margin-top: 8px;
+}
+
+.shaheen-text-warning {
+	color: #dba617 !important;
+}
+
+.shaheen-text-danger {
+	color: #d63638 !important;
+}
+
+.shaheen-text-muted {
+	color: #646970;
+}
+
+/* Buttons */
+.shaheen-btn-group {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	align-items: center;
+	margin-top: 15px;
+}
+
+.shaheen-btn-group .button {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+/* Badges & Tags */
+.shaheen-badge-enabled {
+	color: #008a20;
+	font-weight: 600;
+}
+
+.shaheen-badge-disabled {
+	color: #d63638;
+	font-weight: 600;
+}
+
+.shaheen-badge-type {
+	display: inline-block;
+	background: #f0f0f1;
+	border: 1px solid #dcdcde;
+	color: #2c3338;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	padding: 2px 8px;
+	border-radius: 4px;
+}
+
+.shaheen-status-tag {
+	display: inline-block;
+	font-size: 11px;
+	font-weight: 700;
+	text-transform: uppercase;
+	padding: 3px 8px;
+	border-radius: 4px;
+}
+
+.shaheen-status-new {
+	background: #e7f3ea;
+	color: #1e7e34;
+}
+
+.shaheen-status-unchanged {
+	background: #f0f6fc;
+	color: #2271b1;
+}
+
+.shaheen-status-pending,
+.shaheen-status-pending_review {
+	background: #fcf9e8;
+	color: #996800;
+}
+
+.shaheen-status-needs_review {
+	background: #fff8e5;
+	color: #b35900;
+}
+
+.shaheen-status-skipped {
+	background: #f0f0f1;
+	color: #646970;
+}
+
+.shaheen-status-error {
+	background: #fcf0f1;
+	color: #d63638;
+}
+
+.shaheen-status-discovered {
+	background: #f6f7f7;
+	color: #50575e;
+}
+
+.shaheen-log-level {
+	font-weight: 700;
+	font-size: 11px;
+	padding: 2px 6px;
+	border-radius: 3px;
+}
+
+.shaheen-log-info {
+	background: #e7f3ea;
+	color: #1e7e34;
+}
+
+.shaheen-log-warning {
+	background: #fff8e5;
+	color: #996800;
+}
+
+.shaheen-log-error {
+	background: #fcf0f1;
+	color: #d63638;
+}
+
+/* Filter Bar */
+.shaheen-filter-bar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: center;
+	margin-bottom: 16px;
+	padding: 12px;
+	background: #f6f7f7;
+	border-radius: 4px;
+}
+
+.shaheen-total-count {
+	margin-left: auto;
+	font-weight: 600;
+	color: #646970;
+}
+
+.shaheen-url-link {
+	word-break: break-all;
+	font-family: monospace;
+	font-size: 12px;
+}
+
+.shaheen-meta-sub {
+	font-size: 11px;
+	margin-top: 3px;
+}
+
+/* Progress Bar */
+.shaheen-progress-bar-bg {
+	background: #dcdcde;
+	height: 16px;
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.shaheen-progress-bar-fill {
+	background: #2271b1;
+	height: 100%;
+	width: 0%;
+	transition: width 0.3s ease;
+}
+
+.shaheen-progress-status {
+	margin-top: 8px;
+	font-size: 13px;
+	font-weight: 600;
+	color: #1d2327;
+}
+
+/* Modal Window */
+.shaheen-modal-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background: rgba(0, 0, 0, 0.6);
+	z-index: 99999;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.shaheen-modal-container {
+	background: #ffffff;
+	border-radius: 8px;
+	width: 90%;
+	max-width: 850px;
+	max-height: 85vh;
+	display: flex;
+	flex-direction: column;
+	box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+}
+
+.shaheen-modal-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 16px 24px;
+	border-bottom: 1px solid #dcdcde;
+}
+
+.shaheen-modal-header h3 {
+	margin: 0;
+	font-size: 18px;
+}
+
+.shaheen-modal-close {
+	background: none;
+	border: none;
+	font-size: 24px;
+	cursor: pointer;
+	color: #646970;
+}
+
+.shaheen-modal-body {
+	padding: 24px;
+	overflow-y: auto;
+	flex: 1;
+}
+
+.shaheen-modal-footer {
+	padding: 16px 24px;
+	border-top: 1px solid #dcdcde;
+	display: flex;
+	justify-content: flex-end;
+}
+
+.shaheen-preview-meta {
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	padding: 12px;
+	margin-bottom: 16px;
+	font-size: 12px;
+	line-height: 1.6;
+}
+
+.shaheen-preview-content {
+	background: #ffffff;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	padding: 16px;
+	white-space: pre-wrap;
+	font-family: monospace;
+	font-size: 13px;
+	line-height: 1.5;
+	max-height: 380px;
+	overflow-y: auto;
+}
+
+.shaheen-instructions-box textarea {
+	font-size: 14px;
+	line-height: 1.6;
+	background: #f6f7f7;
+	margin-bottom: 12px;
+}
