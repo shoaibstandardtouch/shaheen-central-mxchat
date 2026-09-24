@@ -1,6 +1,6 @@
 <?php
 /**
- * DOM-based Content Extraction and Cleaning for Shaheen Central MXChat Sync
+ * DOM-based Content Extraction, FAQ Parser & Sensitive Term Scanner
  *
  * @package ShaheenCentralMXChatSync
  */
@@ -60,14 +60,19 @@ class Shaheen_Content_Extractor {
 				'faq_items'              => array(),
 				'sensitive_flags'        => array(),
 				'is_empty_or_low_quality' => true,
+				'word_count'             => 0,
 			);
 		}
 
 		libxml_use_internal_errors( true );
 		$dom = new DOMDocument( '1.0', 'UTF-8' );
 
-		// Convert to UTF-8 HTML entity handling
-		$html_utf8 = mb_convert_encoding( $html, 'HTML-ENTITIES', 'UTF-8' );
+		// Convert to UTF-8 HTML entities safely
+		if ( function_exists( 'mb_convert_encoding' ) ) {
+			$html_utf8 = mb_convert_encoding( $html, 'HTML-ENTITIES', 'UTF-8' );
+		} else {
+			$html_utf8 = '<?xml encoding="UTF-8">' . $html;
+		}
 		@$dom->loadHTML( $html_utf8, LIBXML_NOERROR | LIBXML_NOWARNING | LIBXML_NONET );
 		libxml_clear_errors();
 
@@ -107,13 +112,12 @@ class Shaheen_Content_Extractor {
 		$title = '';
 		$h1_nodes = $xpath->query( '//h1' );
 		if ( $h1_nodes->length > 0 ) {
-			$title = trim( $h1_nodes->item( 0 )->textContent );
+			$title = trim( (string) $h1_nodes->item( 0 )->textContent );
 		}
 		if ( empty( $title ) ) {
 			$title_nodes = $xpath->query( '//title' );
 			if ( $title_nodes->length > 0 ) {
-				$title = trim( $title_nodes->item( 0 )->textContent );
-				// Clean off site suffix like " - Shaheen Group"
+				$title = trim( (string) $title_nodes->item( 0 )->textContent );
 				$parts = preg_split( '/[\-\|\–\—]/', $title );
 				if ( ! empty( $parts[0] ) ) {
 					$title = trim( $parts[0] );
@@ -121,10 +125,10 @@ class Shaheen_Content_Extractor {
 			}
 		}
 
-		// 4. Extract FAQ elements before stripping (e.g. schema.org FAQPage, details, accordion)
-		$faq_items = self::extract_faqs( $xpath );
+		// 4. Extract FAQ elements before stripping (JSON-LD FAQPage + details/summary + accordion)
+		$faq_items = self::extract_faqs( $xpath, $html );
 
-		// 5. Remove unwanted elements from the DOM
+		// 5. Remove unwanted boilerplate elements from DOM
 		self::strip_unwanted_elements( $xpath, $dom );
 
 		// 6. Find Main Content container
@@ -135,24 +139,39 @@ class Shaheen_Content_Extractor {
 		if ( $main_container ) {
 			$h_nodes = $xpath->query( './/h1 | .//h2 | .//h3 | .//h4', $main_container );
 			foreach ( $h_nodes as $hn ) {
-				$txt = trim( preg_replace( '/\s+/', ' ', $hn->textContent ) );
+				$txt = trim( (string) preg_replace( '/\s+/', ' ', $hn->textContent ) );
 				if ( ! empty( $txt ) && ! in_array( $txt, $headings, true ) ) {
 					$headings[] = $txt;
 				}
 			}
 		}
 
-		// 8. Convert content container to structured, clean text
+		// 8. Convert content container to structured clean text
 		$cleaned_text = '';
 		if ( $main_container ) {
 			$cleaned_text = self::node_to_cleaned_text( $main_container );
 		}
 
+		// Append extracted FAQs if not already present in text
+		if ( ! empty( $faq_items ) ) {
+			$faq_block = "\n\n## Frequently Asked Questions\n";
+			$has_new_faq = false;
+			foreach ( $faq_items as $faq ) {
+				if ( stripos( $cleaned_text, $faq['question'] ) === false ) {
+					$faq_block .= "\n**Q: " . $faq['question'] . "**\n" . $faq['answer'] . "\n";
+					$has_new_faq = true;
+				}
+			}
+			if ( $has_new_faq ) {
+				$cleaned_text .= $faq_block;
+			}
+		}
+
 		// Clean multiple spaces and blank lines
-		$cleaned_text = preg_replace( '/\n{3,}/', "\n\n", trim( $cleaned_text ) );
+		$cleaned_text = preg_replace( '/\n{3,}/', "\n\n", trim( (string) $cleaned_text ) );
 
 		// 9. Quality / emptiness check (< 30 words or empty)
-		$word_count = str_word_count( strip_tags( $cleaned_text ) );
+		$word_count = str_word_count( strip_tags( (string) $cleaned_text ) );
 		$is_low_quality = ( $word_count < 30 );
 
 		// 10. Scan for sensitive keywords
@@ -178,7 +197,6 @@ class Shaheen_Content_Extractor {
 	 * @param DOMDocument $dom
 	 */
 	private static function strip_unwanted_elements( DOMXPath $xpath, DOMDocument $dom ) {
-		// Tag names to remove directly
 		$unwanted_tags = array(
 			'script',
 			'style',
@@ -206,7 +224,6 @@ class Shaheen_Content_Extractor {
 			}
 		}
 
-		// Class/ID patterns to remove: cookies, popups, banners, sidebars, social share, breadcrumbs, ads
 		$unwanted_classes = array(
 			'cookie',
 			'consent',
@@ -229,8 +246,7 @@ class Shaheen_Content_Extractor {
 			$nodes = $xpath->query( $query );
 			for ( $i = $nodes->length - 1; $i >= 0; $i-- ) {
 				$node = $nodes->item( $i );
-				// Guard: do not remove <body> or <main> if they happen to have a matching class
-				if ( $node && $node->parentNode && ! in_array( strtolower( $node->nodeName ), array( 'body', 'html', 'main' ), true ) ) {
+				if ( $node && $node->parentNode && ! in_array( strtolower( (string) $node->nodeName ), array( 'body', 'html', 'main' ), true ) ) {
 					$node->parentNode->removeChild( $node );
 				}
 			}
@@ -276,54 +292,51 @@ class Shaheen_Content_Extractor {
 	}
 
 	/**
-	 * Convert DOMNode subtree to clean markdown-like text preserving headings, lists, tables.
+	 * Convert DOMNode subtree to clean markdown text.
 	 *
 	 * @param DOMNode $node
 	 * @return string
 	 */
 	private static function node_to_cleaned_text( DOMNode $node ) {
-		$text = '';
-
 		if ( $node->nodeType === XML_TEXT_NODE ) {
-			$val = preg_replace( '/[ \t]+/', ' ', $node->nodeValue );
-			return $val;
+			return preg_replace( '/[ \t]+/', ' ', (string) $node->nodeValue );
 		}
 
 		if ( $node->nodeType === XML_ELEMENT_NODE ) {
-			$tag = strtolower( $node->nodeName );
+			$tag = strtolower( (string) $node->nodeName );
 
 			switch ( $tag ) {
 				case 'h1':
-					return "\n\n# " . trim( preg_replace( '/\s+/', ' ', $node->textContent ) ) . "\n\n";
+					return "\n\n# " . trim( (string) preg_replace( '/\s+/', ' ', $node->textContent ) ) . "\n\n";
 				case 'h2':
-					return "\n\n## " . trim( preg_replace( '/\s+/', ' ', $node->textContent ) ) . "\n\n";
+					return "\n\n## " . trim( (string) preg_replace( '/\s+/', ' ', $node->textContent ) ) . "\n\n";
 				case 'h3':
-					return "\n\n### " . trim( preg_replace( '/\s+/', ' ', $node->textContent ) ) . "\n\n";
+					return "\n\n### " . trim( (string) preg_replace( '/\s+/', ' ', $node->textContent ) ) . "\n\n";
 				case 'h4':
 				case 'h5':
 				case 'h6':
-					return "\n\n#### " . trim( preg_replace( '/\s+/', ' ', $node->textContent ) ) . "\n\n";
+					return "\n\n#### " . trim( (string) preg_replace( '/\s+/', ' ', $node->textContent ) ) . "\n\n";
 				case 'p':
 					$inner = '';
 					foreach ( $node->childNodes as $child ) {
 						$inner .= self::node_to_cleaned_text( $child );
 					}
-					$inner = trim( preg_replace( '/\s+/', ' ', $inner ) );
+					$inner = trim( (string) preg_replace( '/\s+/', ' ', $inner ) );
 					return ! empty( $inner ) ? "\n\n" . $inner . "\n\n" : '';
 				case 'li':
 					$inner = '';
 					foreach ( $node->childNodes as $child ) {
 						$inner .= self::node_to_cleaned_text( $child );
 					}
-					$inner = trim( preg_replace( '/\s+/', ' ', $inner ) );
+					$inner = trim( (string) preg_replace( '/\s+/', ' ', $inner ) );
 					return ! empty( $inner ) ? "\n* " . $inner : '';
 				case 'br':
 					return "\n";
 				case 'tr':
 					$row = array();
 					foreach ( $node->childNodes as $child ) {
-						if ( $child->nodeType === XML_ELEMENT_NODE && in_array( strtolower( $child->nodeName ), array( 'td', 'th' ), true ) ) {
-							$row[] = trim( preg_replace( '/\s+/', ' ', $child->textContent ) );
+						if ( $child->nodeType === XML_ELEMENT_NODE && in_array( strtolower( (string) $child->nodeName ), array( 'td', 'th' ), true ) ) {
+							$row[] = trim( (string) preg_replace( '/\s+/', ' ', $child->textContent ) );
 						}
 					}
 					return ! empty( $row ) ? "\n| " . implode( ' | ', $row ) . ' |' : '';
@@ -340,21 +353,64 @@ class Shaheen_Content_Extractor {
 	}
 
 	/**
-	 * Extract FAQs from details tags or Q&A structures.
+	 * Extract FAQs from details/summary, accordions, and schema.org FAQPage JSON-LD.
 	 *
 	 * @param DOMXPath $xpath
+	 * @param string   $html
 	 * @return array
 	 */
-	private static function extract_faqs( DOMXPath $xpath ) {
+	public static function extract_faqs( DOMXPath $xpath, $html = '' ) {
 		$faqs = array();
 
-		// HTML5 <details><summary>
+		// 1. JSON-LD FAQPage extraction
+		if ( ! empty( $html ) && strpos( $html, 'FAQPage' ) !== false ) {
+			if ( preg_match_all( '#<script[^>]*type=[\'"]application/ld\+json[\'"][^>]*>(.*?)</script>#is', $html, $matches ) ) {
+				foreach ( $matches[1] as $json_str ) {
+					$data = json_decode( trim( $json_str ), true );
+					if ( is_array( $data ) ) {
+						// Single schema or graph
+						$schemas = isset( $data['@graph'] ) ? $data['@graph'] : array( $data );
+						foreach ( $schemas as $schema ) {
+							if ( isset( $schema['@type'] ) && 'FAQPage' === $schema['@type'] && ! empty( $schema['mainEntity'] ) ) {
+								foreach ( $schema['mainEntity'] as $qa ) {
+									if ( ! empty( $qa['name'] ) && ! empty( $qa['acceptedAnswer']['text'] ) ) {
+										$faqs[] = array(
+											'question' => trim( (string) $qa['name'] ),
+											'answer'   => trim( strip_tags( (string) $qa['acceptedAnswer']['text'] ) ),
+										);
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 2. HTML5 <details><summary>
 		$details = $xpath->query( '//details' );
 		foreach ( $details as $det ) {
 			$summary = $xpath->query( './/summary', $det );
 			if ( $summary->length > 0 ) {
-				$q = trim( $summary->item( 0 )->textContent );
-				$a = trim( str_replace( $q, '', $det->textContent ) );
+				$q = trim( (string) $summary->item( 0 )->textContent );
+				$a = trim( (string) str_replace( $q, '', $det->textContent ) );
+				if ( ! empty( $q ) && ! empty( $a ) ) {
+					$faqs[] = array(
+						'question' => $q,
+						'answer'   => preg_replace( '/\s+/', ' ', $a ),
+					);
+				}
+			}
+		}
+
+		// 3. Visible Accordion structures (.faq-item, .accordion-item)
+		$accordions = $xpath->query( '//*[contains(@class, "faq-item") or contains(@class, "accordion-item")]' );
+		foreach ( $accordions as $acc ) {
+			$h = $xpath->query( './/*[contains(@class, "title") or contains(@class, "question") or contains(@class, "header")]', $acc );
+			$b = $xpath->query( './/*[contains(@class, "content") or contains(@class, "answer") or contains(@class, "body")]', $acc );
+			if ( $h->length > 0 && $b->length > 0 ) {
+				$q = trim( (string) $h->item( 0 )->textContent );
+				$a = trim( (string) $b->item( 0 )->textContent );
 				if ( ! empty( $q ) && ! empty( $a ) ) {
 					$faqs[] = array(
 						'question' => $q,
@@ -374,17 +430,16 @@ class Shaheen_Content_Extractor {
 	 * @return array
 	 */
 	public static function scan_sensitive_terms( $text ) {
-		$text_lower = strtolower( $text );
+		$text_lower = strtolower( (string) $text );
 		$keywords = self::get_configured_sensitive_keywords();
 		$matched = array();
 
 		foreach ( $keywords as $kw ) {
-			$kw_lower = strtolower( trim( $kw ) );
+			$kw_lower = strtolower( trim( (string) $kw ) );
 			if ( empty( $kw_lower ) ) {
 				continue;
 			}
 
-			// Exact word boundary matching where feasible
 			if ( preg_match( '/\b' . preg_quote( $kw_lower, '/' ) . '\b/i', $text_lower ) ) {
 				$matched[] = $kw;
 			}
@@ -404,7 +459,7 @@ class Shaheen_Content_Extractor {
 			return self::get_default_sensitive_keywords();
 		}
 
-		$lines = explode( "\n", str_replace( "\r", '', $saved ) );
+		$lines = explode( "\n", str_replace( "\r", '', (string) $saved ) );
 		$list = array();
 		foreach ( $lines as $line ) {
 			$t = trim( $line );

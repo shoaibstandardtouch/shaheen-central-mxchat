@@ -37,7 +37,7 @@
 			});
 		});
 
-		// 2. Process Batch Button (Looping until complete)
+		// 2. Process Batch Button (Controlled loop with maximum pages limit detection)
 		$('#btn-process-batch').on('click', function(e) {
 			e.preventDefault();
 			if (isProcessing) return;
@@ -57,6 +57,18 @@
 			}, function(response) {
 				if (response.success) {
 					var data = response.data;
+
+					if (data.limit_reached) {
+						updateProgress(data.message, 100);
+						isProcessing = false;
+						$btn.prop('disabled', false);
+						alert(shaheenSync.strings.limitReached);
+						setTimeout(function() {
+							location.reload();
+						}, 1200);
+						return;
+					}
+
 					if (data.done) {
 						updateProgress(data.message, 100);
 						isProcessing = false;
@@ -65,7 +77,6 @@
 						}, 1200);
 					} else {
 						updateProgress(data.message, 50);
-						// Schedule next batch
 						setTimeout(function() {
 							runBatchIteration($btn);
 						}, 400);
@@ -84,7 +95,7 @@
 			});
 		}
 
-		// 3. View Preview Modal
+		// 3. View Preview & Diff Comparison Modal
 		$(document).on('click', '.btn-view-preview', function(e) {
 			e.preventDefault();
 			var recordId = $(this).data('id');
@@ -103,8 +114,10 @@
 						'<strong>Source Domain:</strong> ' + escapeHtml(r.source_domain) + '<br>' +
 						'<strong>Canonical URL:</strong> <a href="' + escapeHtml(r.canonical_url) + '" target="_blank">' + escapeHtml(r.canonical_url) + '</a><br>' +
 						'<strong>Classification Type:</strong> ' + escapeHtml(r.content_type) + '<br>' +
+						'<strong>Language:</strong> ' + escapeHtml(r.language || 'English') + '<br>' +
 						'<strong>Status:</strong> <span class="shaheen-status-tag shaheen-status-' + escapeHtml(r.status) + '">' + escapeHtml(r.status) + '</span><br>' +
-						'<strong>Content SHA-256 Hash:</strong> <code>' + escapeHtml(r.content_hash || '—') + '</code><br>';
+						'<strong>Candidate Hash (SHA-256):</strong> <code>' + escapeHtml(r.candidate_content_hash || '—') + '</code><br>' +
+						'<strong>Accepted Baseline Hash:</strong> <code>' + escapeHtml(r.accepted_content_hash || 'None (New)') + '</code><br>';
 
 					if (r.previous_hash) {
 						metaHtml += '<strong>Previous Hash:</strong> <code>' + escapeHtml(r.previous_hash) + '</code><br>';
@@ -120,8 +133,23 @@
 					}
 					metaHtml += '</div>';
 
-					var contentHtml = '<h4>Cleaned Content Prepared for Future MXChat:</h4>' +
-						'<div class="shaheen-preview-content">' + (r.cleaned_content ? escapeHtml(r.cleaned_content) : '<em>No content extracted.</em>') + '</div>';
+					var contentHtml = '';
+					if (r.accepted_content && r.candidate_content && r.accepted_content !== r.candidate_content) {
+						contentHtml = '<div class="shaheen-diff-columns">' +
+							'<div class="shaheen-diff-col">' +
+							'<h4>Accepted Baseline Content:</h4>' +
+							'<div class="shaheen-preview-content">' + escapeHtml(r.accepted_content) + '</div>' +
+							'</div>' +
+							'<div class="shaheen-diff-col">' +
+							'<h4>Candidate Content (Pending Review):</h4>' +
+							'<div class="shaheen-preview-content shaheen-candidate-box">' + escapeHtml(r.candidate_content) + '</div>' +
+							'</div>' +
+							'</div>';
+					} else {
+						var previewText = r.candidate_content || r.accepted_content || 'No content extracted.';
+						contentHtml = '<h4>Cleaned Content Prepared for Future MXChat:</h4>' +
+							'<div class="shaheen-preview-content">' + escapeHtml(previewText) + '</div>';
+					}
 
 					$('#shaheen-modal-body').html(metaHtml + contentHtml);
 				} else {
@@ -177,12 +205,102 @@
 			});
 		});
 
-		// 5. Toggle Source
-		$(document).on('click', '.btn-toggle-source', function(e) {
+		// 5. Source Onboarding: Validate Source
+		$(document).on('click', '.btn-validate-source', function(e) {
 			e.preventDefault();
 			var $btn = $(this);
 			var sourceId = $btn.data('id');
+			$btn.prop('disabled', true).text('Validating...');
 
+			$.post(shaheenSync.ajaxUrl, {
+				action: 'shaheen_validate_source',
+				id: sourceId,
+				nonce: shaheenSync.nonce
+			}, function(response) {
+				if (response.success) {
+					alert(response.data.message);
+					location.reload();
+				} else {
+					alert('Validation error: ' + (response.data && response.data.message ? response.data.message : 'Failed'));
+					$btn.prop('disabled', false).text('Validate');
+				}
+			}).fail(function() {
+				alert('Network error during source validation.');
+				$btn.prop('disabled', false).text('Validate');
+			});
+		});
+
+		// 6. Source Onboarding: Dry Test Source
+		$(document).on('click', '.btn-dry-test-source', function(e) {
+			e.preventDefault();
+			var $btn = $(this);
+			var sourceId = $btn.data('id');
+			$btn.prop('disabled', true).text('Testing...');
+
+			$.post(shaheenSync.ajaxUrl, {
+				action: 'shaheen_dry_test_source',
+				id: sourceId,
+				nonce: shaheenSync.nonce
+			}, function(response) {
+				$btn.prop('disabled', false).text('Dry Test');
+				if (response.success) {
+					var res = response.data.results;
+					var summary = 'Dry Test Crawl Results (5 sample URLs):\n\n';
+					if (res && res.length) {
+						res.forEach(function(item, idx) {
+							summary += (idx + 1) + '. ' + item.url + ' [' + item.status + ']\n';
+							if (item.reason) summary += '   Reason: ' + item.reason + '\n';
+							if (item.type) summary += '   Type: ' + item.type + '\n';
+						});
+					} else {
+						summary += 'No URLs could be sampled from sitemap.';
+					}
+					alert(summary);
+				} else {
+					alert('Dry test error: ' + (response.data && response.data.message ? response.data.message : 'Failed'));
+				}
+			}).fail(function() {
+				alert('Network error during dry test.');
+				$btn.prop('disabled', false).text('Dry Test');
+			});
+		});
+
+		// 7. Source Onboarding: Approve Source
+		$(document).on('click', '.btn-approve-source', function(e) {
+			e.preventDefault();
+			var sourceId = $(this).data('id');
+			$.post(shaheenSync.ajaxUrl, {
+				action: 'shaheen_approve_source',
+				id: sourceId,
+				nonce: shaheenSync.nonce
+			}, function(response) {
+				if (response.success) {
+					location.reload();
+				}
+			});
+		});
+
+		// 8. Source: Archive
+		$(document).on('click', '.btn-archive-source', function(e) {
+			e.preventDefault();
+			if (!confirm(shaheenSync.strings.confirmArchive)) return;
+
+			var sourceId = $(this).data('id');
+			$.post(shaheenSync.ajaxUrl, {
+				action: 'shaheen_archive_source',
+				id: sourceId,
+				nonce: shaheenSync.nonce
+			}, function(response) {
+				if (response.success) {
+					location.reload();
+				}
+			});
+		});
+
+		// 9. Toggle Source Enabled
+		$(document).on('click', '.btn-toggle-source', function(e) {
+			e.preventDefault();
+			var sourceId = $(this).data('id');
 			$.post(shaheenSync.ajaxUrl, {
 				action: 'shaheen_toggle_source',
 				id: sourceId,
@@ -194,7 +312,7 @@
 			});
 		});
 
-		// 6. Clear Logs
+		// 10. Clear Logs
 		$('#btn-clear-logs').on('click', function(e) {
 			e.preventDefault();
 			if (!confirm(shaheenSync.strings.confirmClear)) return;
@@ -209,7 +327,7 @@
 			});
 		});
 
-		// 7. Release Stale Lock
+		// 11. Release Stale Lock
 		$('#btn-release-lock').on('click', function(e) {
 			e.preventDefault();
 			$.post(shaheenSync.ajaxUrl, {
@@ -222,7 +340,7 @@
 			});
 		});
 
-		// 8. Copy Chatbot Instructions
+		// 12. Copy Chatbot Instructions
 		$('#btn-copy-instructions').on('click', function(e) {
 			e.preventDefault();
 			var text = $('#shaheen-instructions-text').val();

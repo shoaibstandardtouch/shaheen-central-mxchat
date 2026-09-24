@@ -4,7 +4,7 @@
 
 .shaheen-wrap {
 	margin-top: 20px;
-	max-width: 1400px;
+	max-width: 1450px;
 }
 
 .shaheen-header {
@@ -71,6 +71,7 @@
 	align-items: center;
 	gap: 6px;
 	font-weight: 500;
+	margin-bottom: 4px;
 }
 
 .shaheen-count-bubble {
@@ -114,27 +115,27 @@
 /* Dashboard Grid */
 .shaheen-dashboard-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-	gap: 16px;
+	grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+	gap: 14px;
 	margin-bottom: 24px;
 }
 
 .shaheen-stat-card {
-	padding: 20px;
+	padding: 18px 14px;
 	text-align: center;
 	margin-bottom: 0;
 	border-top: 3px solid #2271b1;
 }
 
 .shaheen-stat-num {
-	font-size: 26px;
+	font-size: 24px;
 	font-weight: 700;
 	color: #1d2327;
 	line-height: 1.2;
 }
 
 .shaheen-stat-label {
-	font-size: 12px;
+	font-size: 11px;
 	font-weight: 600;
 	color: #646970;
 	text-transform: uppercase;
@@ -179,6 +180,41 @@
 	font-weight: 600;
 }
 
+.shaheen-source-status {
+	display: inline-block;
+	font-size: 11px;
+	font-weight: 700;
+	padding: 3px 8px;
+	border-radius: 4px;
+	background: #f0f0f1;
+	color: #2c3338;
+}
+
+.shaheen-source-status.shaheen-status-approved {
+	background: #e7f3ea;
+	color: #1e7e34;
+}
+
+.shaheen-source-status.shaheen-status-draft {
+	background: #f0f6fc;
+	color: #2271b1;
+}
+
+.shaheen-source-status.shaheen-status-validating {
+	background: #fff8e5;
+	color: #996800;
+}
+
+.shaheen-source-status.shaheen-status-validation_failed {
+	background: #fcf0f1;
+	color: #d63638;
+}
+
+.shaheen-source-status.shaheen-status-archived {
+	background: #e0e0e0;
+	color: #646970;
+}
+
 .shaheen-badge-type {
 	display: inline-block;
 	background: #f0f0f1;
@@ -221,7 +257,18 @@
 	color: #b35900;
 }
 
-.shaheen-status-skipped {
+.shaheen-status-queued_check {
+	background: #f0f6fc;
+	color: #2271b1;
+}
+
+.shaheen-status-missing_from_source {
+	background: #fcf0f1;
+	color: #900;
+}
+
+.shaheen-status-skipped,
+.shaheen-status-rejected {
 	background: #f0f0f1;
 	color: #646970;
 }
@@ -271,7 +318,6 @@
 }
 
 .shaheen-total-count {
-	margin-left: auto;
 	font-weight: 600;
 	color: #646970;
 }
@@ -326,9 +372,9 @@
 .shaheen-modal-container {
 	background: #ffffff;
 	border-radius: 8px;
-	width: 90%;
-	max-width: 850px;
-	max-height: 85vh;
+	width: 92%;
+	max-width: 950px;
+	max-height: 88vh;
 	display: flex;
 	flex-direction: column;
 	box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
@@ -385,10 +431,26 @@
 	padding: 16px;
 	white-space: pre-wrap;
 	font-family: monospace;
-	font-size: 13px;
+	font-size: 12px;
 	line-height: 1.5;
 	max-height: 380px;
 	overflow-y: auto;
+}
+
+.shaheen-candidate-box {
+	border-color: #dba617;
+	background: #fffdf5;
+}
+
+.shaheen-diff-columns {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 16px;
+}
+
+.shaheen-diff-col h4 {
+	margin-top: 0;
+	margin-bottom: 8px;
 }
 
 .shaheen-instructions-box textarea {

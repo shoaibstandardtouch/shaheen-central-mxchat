@@ -34,6 +34,7 @@ require_once SHAHEEN_SYNC_PLUGIN_DIR . 'includes/class-shaheen-url-filter.php';
 require_once SHAHEEN_SYNC_PLUGIN_DIR . 'includes/class-shaheen-page-fetcher.php';
 require_once SHAHEEN_SYNC_PLUGIN_DIR . 'includes/class-shaheen-content-extractor.php';
 require_once SHAHEEN_SYNC_PLUGIN_DIR . 'includes/class-shaheen-classifier.php';
+require_once SHAHEEN_SYNC_PLUGIN_DIR . 'includes/class-shaheen-crawler.php';
 require_once SHAHEEN_SYNC_PLUGIN_DIR . 'includes/class-shaheen-sync-engine.php';
 require_once SHAHEEN_SYNC_PLUGIN_DIR . 'includes/class-shaheen-cron.php';
 require_once SHAHEEN_SYNC_PLUGIN_DIR . 'includes/class-shaheen-exporter.php';

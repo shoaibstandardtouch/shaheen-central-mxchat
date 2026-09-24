@@ -1,6 +1,6 @@
 <?php
 /**
- * Source Website Manager for Shaheen Central MXChat Sync
+ * Source Website Manager & Onboarding for Shaheen Central MXChat Sync
  *
  * @package ShaheenCentralMXChatSync
  */
@@ -34,12 +34,16 @@ class Shaheen_Source_Manager {
 					'domain'          => $default_domain,
 					'sitemap_url'     => 'https://dammam.shaheengroup.org/wp-sitemap.xml',
 					'category'        => 'Education',
+					'language'        => 'English',
+					'crawl_frequency' => 'daily',
+					'status'          => 'approved',
 					'is_enabled'      => 1,
+					'notes'           => 'Initial approved source for Dammam & Al-Khobar academy.',
 					'last_crawled_at' => null,
 					'created_at'      => current_time( 'mysql' ),
 					'updated_at'      => current_time( 'mysql' ),
 				),
-				array( '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s' )
+				array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s' )
 			);
 
 			Shaheen_Logger::info( 'Initial source seeded: Shaheen Academy Dammam / Al-Khobar (' . $default_domain . ')' );
@@ -58,14 +62,29 @@ class Shaheen_Source_Manager {
 	}
 
 	/**
-	 * Get enabled sources only.
+	 * Get eligible sources for scheduled synchronization (must be approved AND enabled).
+	 *
+	 * @return array
+	 */
+	public static function get_sync_eligible_sources() {
+		global $wpdb;
+		$table = Shaheen_DB::get_sources_table();
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM {$table} WHERE is_enabled = 1 AND status = %s ORDER BY id ASC",
+				'approved'
+			),
+			ARRAY_A
+		);
+	}
+
+	/**
+	 * Alias for backward compatibility.
 	 *
 	 * @return array
 	 */
 	public static function get_enabled_sources() {
-		global $wpdb;
-		$table = Shaheen_DB::get_sources_table();
-		return $wpdb->get_results( "SELECT * FROM {$table} WHERE is_enabled = 1 ORDER BY id ASC", ARRAY_A );
+		return self::get_sync_eligible_sources();
 	}
 
 	/**
@@ -111,14 +130,14 @@ class Shaheen_Source_Manager {
 			$host = $url_or_domain;
 		}
 
-		$host = strtolower( trim( $host ) );
+		$host = strtolower( trim( (string) $host ) );
 		$source = self::get_source_by_domain( $host );
 
-		return ( ! empty( $source ) && (int) $source['is_enabled'] === 1 );
+		return ( ! empty( $source ) && (int) $source['is_enabled'] === 1 && $source['status'] === 'approved' );
 	}
 
 	/**
-	 * Validate source input data.
+	 * Validate source input fields.
 	 *
 	 * @param array $data
 	 * @param int   $exclude_id
@@ -128,14 +147,13 @@ class Shaheen_Source_Manager {
 		$institution = isset( $data['institution'] ) ? sanitize_text_field( trim( $data['institution'] ) ) : '';
 		$domain      = isset( $data['domain'] ) ? self::sanitize_domain( $data['domain'] ) : '';
 		$sitemap_url = isset( $data['sitemap_url'] ) ? esc_url_raw( trim( $data['sitemap_url'] ) ) : '';
-		$category    = isset( $data['category'] ) ? sanitize_text_field( trim( $data['category'] ) ) : 'Education';
 
 		if ( empty( $institution ) ) {
 			return new WP_Error( 'invalid_institution', __( 'Institution name is required.', 'shaheen-central-mxchat-sync' ) );
 		}
 
 		if ( empty( $domain ) || ! self::is_valid_hostname( $domain ) ) {
-			return new WP_Error( 'invalid_domain', __( 'Domain must be a valid, approved public hostname (e.g. dammam.shaheengroup.org).', 'shaheen-central-mxchat-sync' ) );
+			return new WP_Error( 'invalid_domain', __( 'Domain must be a valid, approved public hostname.', 'shaheen-central-mxchat-sync' ) );
 		}
 
 		// Disallow localhost or private IP addresses
@@ -144,12 +162,12 @@ class Shaheen_Source_Manager {
 		}
 
 		if ( empty( $sitemap_url ) || strpos( strtolower( $sitemap_url ), 'https://' ) !== 0 ) {
-			return new WP_Error( 'invalid_sitemap_url', __( 'Sitemap URL must use HTTPS (e.g. https://domain/wp-sitemap.xml).', 'shaheen-central-mxchat-sync' ) );
+			return new WP_Error( 'invalid_sitemap_url', __( 'Sitemap URL must use HTTPS.', 'shaheen-central-mxchat-sync' ) );
 		}
 
 		$sitemap_host = strtolower( (string) wp_parse_url( $sitemap_url, PHP_URL_HOST ) );
 		if ( $sitemap_host !== $domain ) {
-			return new WP_Error( 'domain_mismatch', __( 'Sitemap URL domain must exactly match the configured source domain.', 'shaheen-central-mxchat-sync' ) );
+			return new WP_Error( 'domain_mismatch', __( 'Sitemap URL host must exactly match the configured source domain.', 'shaheen-central-mxchat-sync' ) );
 		}
 
 		// Check domain uniqueness
@@ -180,7 +198,7 @@ class Shaheen_Source_Manager {
 	}
 
 	/**
-	 * Add a new source.
+	 * Add a new source (begins as 'draft').
 	 *
 	 * @param array $data
 	 * @return int|WP_Error
@@ -193,7 +211,6 @@ class Shaheen_Source_Manager {
 
 		global $wpdb;
 		$table = Shaheen_DB::get_sources_table();
-
 		$domain = self::sanitize_domain( $data['domain'] );
 
 		$inserted = $wpdb->insert(
@@ -202,27 +219,31 @@ class Shaheen_Source_Manager {
 				'institution'     => sanitize_text_field( $data['institution'] ),
 				'domain'          => $domain,
 				'sitemap_url'     => esc_url_raw( $data['sitemap_url'] ),
-				'category'        => sanitize_text_field( ! empty( $data['category'] ) ? $data['category'] : 'Education' ),
-				'is_enabled'      => ! empty( $data['is_enabled'] ) ? 1 : 0,
+				'category'        => ! empty( $data['category'] ) ? sanitize_text_field( $data['category'] ) : 'Education',
+				'language'        => ! empty( $data['language'] ) ? sanitize_text_field( $data['language'] ) : 'English',
+				'crawl_frequency' => ! empty( $data['crawl_frequency'] ) ? sanitize_key( $data['crawl_frequency'] ) : 'daily',
+				'status'          => 'draft',
+				'is_enabled'      => 0, // Starts disabled until validated and approved
+				'notes'           => ! empty( $data['notes'] ) ? sanitize_textarea_field( $data['notes'] ) : null,
 				'last_crawled_at' => null,
 				'created_at'      => current_time( 'mysql' ),
 				'updated_at'      => current_time( 'mysql' ),
 			),
-			array( '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s' )
+			array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s' )
 		);
 
 		if ( false === $inserted ) {
-			return new WP_Error( 'db_insert_failed', __( 'Could not save the source website to the database.', 'shaheen-central-mxchat-sync' ) );
+			return new WP_Error( 'db_insert_failed', __( 'Could not save the source website.', 'shaheen-central-mxchat-sync' ) );
 		}
 
 		$new_id = (int) $wpdb->insert_id;
-		Shaheen_Logger::info( "Added source website: {$data['institution']} ({$domain})" );
+		Shaheen_Logger::info( "Added new source website draft: {$data['institution']} ({$domain})" );
 
 		return $new_id;
 	}
 
 	/**
-	 * Update an existing source.
+	 * Update an existing source. If domain changes, reset to 'draft' and disabled.
 	 *
 	 * @param int   $id
 	 * @param array $data
@@ -230,6 +251,11 @@ class Shaheen_Source_Manager {
 	 */
 	public static function update_source( $id, $data ) {
 		$id = absint( $id );
+		$existing = self::get_source( $id );
+		if ( ! $existing ) {
+			return new WP_Error( 'not_found', __( 'Source not found.', 'shaheen-central-mxchat-sync' ) );
+		}
+
 		$validation = self::validate_source_data( $data, $id );
 		if ( is_wp_error( $validation ) ) {
 			return $validation;
@@ -237,20 +263,33 @@ class Shaheen_Source_Manager {
 
 		global $wpdb;
 		$table = Shaheen_DB::get_sources_table();
-		$domain = self::sanitize_domain( $data['domain'] );
+		$new_domain = self::sanitize_domain( $data['domain'] );
+
+		// If domain changed, require re-validation and reset to draft
+		$status = $existing['status'];
+		$is_enabled = $existing['is_enabled'];
+		if ( $new_domain !== $existing['domain'] ) {
+			$status = 'draft';
+			$is_enabled = 0;
+			Shaheen_Logger::warning( "Domain changed for source ID {$id}. Resetting status to draft." );
+		}
 
 		$updated = $wpdb->update(
 			$table,
 			array(
-				'institution' => sanitize_text_field( $data['institution'] ),
-				'domain'      => $domain,
-				'sitemap_url' => esc_url_raw( $data['sitemap_url'] ),
-				'category'    => sanitize_text_field( ! empty( $data['category'] ) ? $data['category'] : 'Education' ),
-				'is_enabled'  => ! empty( $data['is_enabled'] ) ? 1 : 0,
-				'updated_at'  => current_time( 'mysql' ),
+				'institution'     => sanitize_text_field( $data['institution'] ),
+				'domain'          => $new_domain,
+				'sitemap_url'     => esc_url_raw( $data['sitemap_url'] ),
+				'category'        => ! empty( $data['category'] ) ? sanitize_text_field( $data['category'] ) : 'Education',
+				'language'        => ! empty( $data['language'] ) ? sanitize_text_field( $data['language'] ) : 'English',
+				'crawl_frequency' => ! empty( $data['crawl_frequency'] ) ? sanitize_key( $data['crawl_frequency'] ) : 'daily',
+				'status'          => $status,
+				'is_enabled'      => $is_enabled,
+				'notes'           => isset( $data['notes'] ) ? sanitize_textarea_field( $data['notes'] ) : $existing['notes'],
+				'updated_at'      => current_time( 'mysql' ),
 			),
 			array( 'id' => $id ),
-			array( '%s', '%s', '%s', '%s', '%d', '%s' ),
+			array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s' ),
 			array( '%d' )
 		);
 
@@ -258,34 +297,140 @@ class Shaheen_Source_Manager {
 			return new WP_Error( 'db_update_failed', __( 'Database error while updating source.', 'shaheen-central-mxchat-sync' ) );
 		}
 
-		Shaheen_Logger::info( "Updated source website ID {$id} ({$domain})" );
+		Shaheen_Logger::info( "Updated source website ID {$id} ({$new_domain})" );
 		return true;
 	}
 
 	/**
-	 * Delete a source website and optionally cascade delete its records.
+	 * Validate a source: tests HTTPS reachability, parses sitemap index, and identifies child sitemaps.
+	 *
+	 * @param int $id
+	 * @return array
+	 */
+	public static function validate_source( $id ) {
+		$source = self::get_source( $id );
+		if ( ! $source ) {
+			return array( 'success' => false, 'message' => 'Source not found.' );
+		}
+
+		global $wpdb;
+		$table = Shaheen_DB::get_sources_table();
+
+		// Set status to validating
+		$wpdb->update( $table, array( 'status' => 'validating' ), array( 'id' => $id ) );
+
+		// Fetch sitemap safely with controlled redirects
+		$fetch = Shaheen_Page_Fetcher::fetch_with_controlled_redirects( $source['sitemap_url'], $source['domain'] );
+		if ( ! $fetch['success'] ) {
+			$wpdb->update( $table, array( 'status' => 'validation_failed' ), array( 'id' => $id ) );
+			Shaheen_Logger::error( "Validation failed for {$source['domain']}: {$fetch['error']}" );
+			return array(
+				'success' => false,
+				'message' => 'Sitemap fetch failed: ' . $fetch['error'],
+			);
+		}
+
+		// Parse XML safely
+		libxml_use_internal_errors( true );
+		$xml = simplexml_load_string( $fetch['body'], 'SimpleXMLElement', LIBXML_NONET );
+		if ( false === $xml ) {
+			libxml_clear_errors();
+			$wpdb->update( $table, array( 'status' => 'validation_failed' ), array( 'id' => $id ) );
+			return array(
+				'success' => false,
+				'message' => 'Malformed sitemap XML.',
+			);
+		}
+
+		$supported_children = array();
+		$rejected_children  = array();
+		$estimated_urls     = 0;
+
+		if ( 'sitemapindex' === $xml->getName() || isset( $xml->sitemap ) ) {
+			foreach ( $xml->sitemap as $s ) {
+				$loc = isset( $s->loc ) ? trim( (string) $s->loc ) : '';
+				if ( empty( $loc ) ) {
+					continue;
+				}
+
+				if ( Shaheen_Crawler::is_supported_child_sitemap( $loc ) ) {
+					$supported_children[] = $loc;
+				} else {
+					$rejected_children[] = $loc;
+				}
+			}
+		} elseif ( 'urlset' === $xml->getName() || isset( $xml->url ) ) {
+			$supported_children[] = $source['sitemap_url'];
+			$estimated_urls = count( $xml->url );
+		}
+
+		// Source passes validation
+		$wpdb->update(
+			$table,
+			array(
+				'status'     => 'dry_run',
+				'updated_at' => current_time( 'mysql' ),
+			),
+			array( 'id' => $id )
+		);
+
+		return array(
+			'success'            => true,
+			'supported_children' => $supported_children,
+			'rejected_children'  => $rejected_children,
+			'estimated_urls'     => $estimated_urls,
+			'message'            => sprintf(
+				'Validation passed! Found %d supported child sitemaps, %d non-content sitemaps excluded.',
+				count( $supported_children ),
+				count( $rejected_children )
+			),
+		);
+	}
+
+	/**
+	 * Run a dry test on a source website (fetches test batch of up to 5 URLs without saving live records).
+	 *
+	 * @param int $id
+	 * @return array
+	 */
+	public static function dry_test_source( $id ) {
+		$source = self::get_source( $id );
+		if ( ! $source ) {
+			return array( 'success' => false, 'message' => 'Source not found.' );
+		}
+
+		// Perform discovery of first child sitemap or urlset
+		$test_result = Shaheen_Crawler::crawl_source_test_batch( $source, 5 );
+
+		return array(
+			'success' => true,
+			'results' => $test_result,
+			'message' => 'Dry test batch completed.',
+		);
+	}
+
+	/**
+	 * Approve a source website.
 	 *
 	 * @param int $id
 	 * @return bool
 	 */
-	public static function delete_source( $id ) {
+	public static function approve_source( $id ) {
 		$id = absint( $id );
-		$source = self::get_source( $id );
-		if ( ! $source ) {
-			return false;
-		}
-
 		global $wpdb;
-		$sources_table = Shaheen_DB::get_sources_table();
-		$records_table = Shaheen_DB::get_records_table();
+		$table = Shaheen_DB::get_sources_table();
 
-		// Delete associated records for this domain
-		$wpdb->delete( $records_table, array( 'source_domain' => $source['domain'] ), array( '%s' ) );
-		// Delete source
-		$deleted = $wpdb->delete( $sources_table, array( 'id' => $id ), array( '%d' ) );
+		$updated = $wpdb->update(
+			$table,
+			array(
+				'status'     => 'approved',
+				'updated_at' => current_time( 'mysql' ),
+			),
+			array( 'id' => $id )
+		);
 
-		Shaheen_Logger::info( "Deleted source website ID {$id} ({$source['domain']})" );
-		return (bool) $deleted;
+		Shaheen_Logger::info( "Approved source website ID {$id}." );
+		return (bool) $updated;
 	}
 
 	/**
@@ -311,9 +456,7 @@ class Shaheen_Source_Manager {
 				'is_enabled' => $new_state,
 				'updated_at' => current_time( 'mysql' ),
 			),
-			array( 'id' => $id ),
-			array( '%d', '%s' ),
-			array( '%d' )
+			array( 'id' => $id )
 		);
 
 		Shaheen_Logger::info( "Toggled source website ID {$id} to " . ( $new_state ? 'enabled' : 'disabled' ) );
@@ -321,7 +464,58 @@ class Shaheen_Source_Manager {
 	}
 
 	/**
-	 * Sanitize a domain string.
+	 * Archive a source website (preserves historical records).
+	 *
+	 * @param int $id
+	 * @return bool
+	 */
+	public static function archive_source( $id ) {
+		$id = absint( $id );
+		global $wpdb;
+		$table = Shaheen_DB::get_sources_table();
+
+		$updated = $wpdb->update(
+			$table,
+			array(
+				'status'     => 'archived',
+				'is_enabled' => 0,
+				'updated_at' => current_time( 'mysql' ),
+			),
+			array( 'id' => $id )
+		);
+
+		Shaheen_Logger::info( "Archived source website ID {$id}." );
+		return (bool) $updated;
+	}
+
+	/**
+	 * Delete a source website with explicit confirmation.
+	 *
+	 * @param int $id
+	 * @return bool
+	 */
+	public static function delete_source( $id ) {
+		$id = absint( $id );
+		$source = self::get_source( $id );
+		if ( ! $source ) {
+			return false;
+		}
+
+		global $wpdb;
+		$sources_table = Shaheen_DB::get_sources_table();
+		$records_table = Shaheen_DB::get_records_table();
+
+		// Delete associated records for this domain
+		$wpdb->delete( $records_table, array( 'source_domain' => $source['domain'] ), array( '%s' ) );
+		// Delete source
+		$deleted = $wpdb->delete( $sources_table, array( 'id' => $id ), array( '%d' ) );
+
+		Shaheen_Logger::info( "Deleted source website ID {$id} ({$source['domain']})" );
+		return (bool) $deleted;
+	}
+
+	/**
+	 * Sanitize domain name.
 	 *
 	 * @param string $domain
 	 * @return string
@@ -330,12 +524,12 @@ class Shaheen_Source_Manager {
 		$domain = trim( strtolower( (string) $domain ) );
 		$domain = preg_replace( '#^https?://#i', '', $domain );
 		$domain = explode( '/', $domain )[0];
-		$domain = explode( ':', $domain )[0]; // remove port
+		$domain = explode( ':', $domain )[0];
 		return sanitize_text_field( $domain );
 	}
 
 	/**
-	 * Check if hostname is valid RFC format.
+	 * Validate hostname RFC compliance.
 	 *
 	 * @param string $domain
 	 * @return bool
@@ -344,7 +538,6 @@ class Shaheen_Source_Manager {
 		if ( empty( $domain ) || strlen( $domain ) > 253 ) {
 			return false;
 		}
-
 		return (bool) preg_match( '/^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i', $domain );
 	}
 }

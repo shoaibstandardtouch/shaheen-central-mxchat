@@ -2,10 +2,9 @@
 /**
  * MXChat API Integration Architecture & Phase 2 Placeholder
  *
- * IMPORTANT NOTE FOR PHASE 1:
- * In accordance with Phase 1 safety rules, live MXChat HTTP posting
- * is STRICTLY DISABLED in this version. No outbound API requests to MXChat
- * are executed under any circumstances.
+ * CRITICAL DELIVERY GUARANTEE:
+ * Live MXChat HTTP posting and transcript fetching are 100% DISABLED
+ * in Phase 1. No network requests are made to MXChat endpoints.
  *
  * @package ShaheenCentralMXChatSync
  */
@@ -17,18 +16,23 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Shaheen_MXChat_Placeholder {
 
 	/**
-	 * Future target MXChat endpoint.
+	 * Future target MXChat knowledge endpoint.
 	 */
-	const LIVE_ENDPOINT = 'https://shaheengroup.org/wp-json/mxchat/v1/knowledge';
+	const KNOWLEDGE_ENDPOINT = 'https://shaheengroup.org/wp-json/mxchat/v1/knowledge';
 
 	/**
-	 * Phase 1 Lock constant.
+	 * Future transcript reading endpoint.
+	 */
+	const TRANSCRIPTS_ENDPOINT = 'https://shaheengroup.org/wp-json/mxchat/v1/transcripts';
+
+	/**
+	 * Phase 1 Lockout constant.
 	 * Must remain TRUE throughout Phase 1.
 	 */
 	const IS_PHASE_1_LOCKED = true;
 
 	/**
-	 * Check whether MXChat live posting is locked.
+	 * Verify whether Phase 1 posting lock is active.
 	 *
 	 * @return bool Always true in Phase 1.
 	 */
@@ -37,7 +41,7 @@ class Shaheen_MXChat_Placeholder {
 	}
 
 	/**
-	 * Retrieve token securely from wp-config.php constant only.
+	 * Safely retrieve token from wp-config.php constant only.
 	 * Never reads from database, never exposes in logs or UI.
 	 *
 	 * @return string|false
@@ -53,9 +57,9 @@ class Shaheen_MXChat_Placeholder {
 	 * Format payload according to MXChat API specifications.
 	 * Supported fields: content, source_url, content_type
 	 *
-	 * @param string $content Cleaned content with source context header
-	 * @param string $source_url Normalized canonical URL
-	 * @param string $content_type One of: page, programme, admissions, FAQ, post
+	 * @param string $content
+	 * @param string $source_url
+	 * @param string $content_type
 	 * @return array
 	 */
 	public static function build_payload( $content, $source_url, $content_type ) {
@@ -67,16 +71,27 @@ class Shaheen_MXChat_Placeholder {
 	}
 
 	/**
-	 * Phase 2 send method - STRICTLY DISABLED IN PHASE 1.
+	 * Future Phase 2 send knowledge method - STRICTLY DISABLED IN PHASE 1.
 	 *
 	 * @param array $record
 	 * @return WP_Error
 	 */
 	public static function send_knowledge_item( $record ) {
-		// Strict Phase 1 guard
 		return new WP_Error(
 			'phase_1_posting_disabled',
-			__( 'MXChat live posting is completely disabled in Phase 1. No network requests are made to MXChat.', 'shaheen-central-mxchat-sync' )
+			__( 'Phase 1 Delivery Notice: Live posting to MXChat is permanently locked and disabled in this release. No network request was executed.', 'shaheen-central-mxchat-sync' )
+		);
+	}
+
+	/**
+	 * Future transcript fetching method - STRICTLY DISABLED IN PHASE 1.
+	 *
+	 * @return WP_Error
+	 */
+	public static function fetch_transcripts() {
+		return new WP_Error(
+			'phase_1_transcripts_disabled',
+			__( 'Phase 1 Delivery Notice: Transcript fetching from MXChat is disabled in this release.', 'shaheen-central-mxchat-sync' )
 		);
 	}
 }

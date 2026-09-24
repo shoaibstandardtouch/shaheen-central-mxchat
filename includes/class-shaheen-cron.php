@@ -25,7 +25,6 @@ class Shaheen_Cron {
 	 */
 	public static function schedule_event() {
 		if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
-			// Schedule to run daily at 02:00 AM local time or next hour
 			$recurrence = get_option( 'shaheen_sync_cron_recurrence', 'daily' );
 			wp_schedule_event( time() + 3600, $recurrence, self::CRON_HOOK );
 			Shaheen_Logger::info( 'Scheduled recurring WP-Cron event (' . $recurrence . ').' );
@@ -44,39 +43,39 @@ class Shaheen_Cron {
 	}
 
 	/**
-	 * Daily scheduled sync runner.
+	 * Scheduled sync runner with strict execution time & page limits.
 	 */
 	public static function run_scheduled_sync() {
 		Shaheen_Logger::info( 'WP-Cron triggered scheduled crawl and dry-run analysis.' );
 
-		// Step 1: Crawl enabled sources sitemaps
+		// Step 1: Sitemap discovery on approved and enabled sources
 		$discovery = Shaheen_Sync_Engine::run_sitemap_discovery();
 		if ( ! $discovery['success'] ) {
-			Shaheen_Logger::error( 'Cron sitemap discovery failed: ' . $discovery['message'] );
+			Shaheen_Logger::error( 'Cron sitemap discovery halted: ' . $discovery['message'] );
 			return;
 		}
 
-		// Step 2: Process batch of discovered pages within execution time budget
-		$max_pages = absint( get_option( 'shaheen_sync_max_pages_per_sync', 100 ) );
-		$batch_size = absint( get_option( 'shaheen_sync_batch_size', 10 ) );
-		$processed_total = 0;
-		$start_time = time();
+		// Step 2: Process batch with time budget (25s) and maximum pages limit
+		$max_pages   = absint( get_option( 'shaheen_sync_max_pages_per_sync', 100 ) );
+		$batch_size  = absint( get_option( 'shaheen_sync_batch_size', 10 ) );
+		$start_time  = time();
+		$total_run   = 0;
 
-		while ( $processed_total < $max_pages ) {
-			// Limit execution to 25 seconds per cron run to avoid PHP execution limits
+		while ( $total_run < $max_pages ) {
+			// Limit execution to 25s per cron run to avoid PHP execution timeouts
 			if ( ( time() - $start_time ) > 25 ) {
-				Shaheen_Logger::info( "Cron batch execution paused after {$processed_total} pages to avoid timeout." );
+				Shaheen_Logger::info( "Cron batch run paused after {$total_run} pages to avoid script timeout." );
 				break;
 			}
 
-			$result = Shaheen_Sync_Engine::process_batch( $batch_size );
+			$result = Shaheen_Sync_Engine::process_batch( $batch_size, $max_pages );
 			if ( ! $result['success'] || $result['done'] ) {
 				break;
 			}
 
-			$processed_total += $result['processed'];
+			$total_run += $result['processed'];
 		}
 
-		Shaheen_Logger::info( "Cron job finished batch pass. Analyzed {$processed_total} pages in dry-run mode." );
+		Shaheen_Logger::info( "Cron pass completed. Analyzed {$total_run} pages." );
 	}
 }

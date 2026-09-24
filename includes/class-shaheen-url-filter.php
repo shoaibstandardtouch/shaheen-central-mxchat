@@ -1,6 +1,6 @@
 <?php
 /**
- * URL Normalization and Filtering for Shaheen Central MXChat Sync
+ * URL Filtering, Canonical Normalization, Collision Detection & SSRF Protection
  *
  * @package ShaheenCentralMXChatSync
  */
@@ -66,7 +66,6 @@ class Shaheen_URL_Filter {
 			'mc_cid',
 			'_ga',
 			'ref',
-			'v',
 		);
 	}
 
@@ -118,7 +117,7 @@ class Shaheen_URL_Filter {
 		// Check default exclusion patterns
 		$patterns = self::get_all_excluded_patterns();
 		foreach ( $patterns as $pattern ) {
-			$pattern = trim( $pattern );
+			$pattern = trim( (string) $pattern );
 			if ( empty( $pattern ) ) {
 				continue;
 			}
@@ -168,17 +167,21 @@ class Shaheen_URL_Filter {
 	 * @return bool
 	 */
 	public static function is_private_or_loopback( $host ) {
-		$host = strtolower( trim( $host ) );
+		$host = strtolower( trim( (string) $host ) );
 
-		if ( 'localhost' === $host || '127.0.0.1' === $host || '::1' === $host ) {
+		if ( empty( $host ) || 'localhost' === $host || '127.0.0.1' === $host || '::1' === $host ) {
 			return true;
 		}
 
-		// Resolve IP if hostname
+		// Reject internal/non-FQDN names without dot
+		if ( strpos( $host, '.' ) === false ) {
+			return true;
+		}
+
+		// Check if IP or resolve
 		$ip = filter_var( $host, FILTER_VALIDATE_IP ) ? $host : @gethostbyname( $host );
 
 		if ( ! empty( $ip ) && filter_var( $ip, FILTER_VALIDATE_IP ) ) {
-			// Check for private and reserved IP ranges
 			if ( ! filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) ) {
 				return true;
 			}
@@ -188,19 +191,53 @@ class Shaheen_URL_Filter {
 	}
 
 	/**
+	 * Validate a canonical tag extracted from HTML.
+	 *
+	 * @param string $canonical_tag
+	 * @param string $expected_domain
+	 * @return string|false Validated canonical URL or false if invalid.
+	 */
+	public static function validate_canonical_tag( $canonical_tag, $expected_domain ) {
+		if ( empty( $canonical_tag ) || ! is_string( $canonical_tag ) ) {
+			return false;
+		}
+
+		$parsed = wp_parse_url( $canonical_tag );
+		if ( ! $parsed || empty( $parsed['host'] ) ) {
+			return false;
+		}
+
+		$scheme = isset( $parsed['scheme'] ) ? strtolower( $parsed['scheme'] ) : '';
+		if ( 'https' !== $scheme ) {
+			return false; // HTTPS only
+		}
+
+		$host = strtolower( $parsed['host'] );
+		if ( $host !== strtolower( $expected_domain ) ) {
+			return false; // No external or cross-domain canonicals
+		}
+
+		if ( self::is_private_or_loopback( $host ) ) {
+			return false; // No private/internal targets
+		}
+
+		return $canonical_tag;
+	}
+
+	/**
 	 * Normalize a URL according to specification.
 	 *
 	 * @param string $url
 	 * @param string $canonical_tag_url Optional canonical tag found in HTML.
+	 * @param string $expected_domain
 	 * @return string
 	 */
-	public static function normalize_url( $url, $canonical_tag_url = '' ) {
-		// Prefer valid canonical tag if it belongs to the same domain and is HTTPS
-		if ( ! empty( $canonical_tag_url ) ) {
-			$orig_host = strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) );
-			$canon_parsed = wp_parse_url( $canonical_tag_url );
-			if ( ! empty( $canon_parsed['host'] ) && strtolower( $canon_parsed['host'] ) === $orig_host ) {
-				$url = $canonical_tag_url;
+	public static function normalize_url( $url, $canonical_tag_url = '', $expected_domain = '' ) {
+		// Prefer valid canonical tag if it passes strict validation
+		if ( ! empty( $canonical_tag_url ) && ! empty( $expected_domain ) ) {
+			$validated_canonical = self::validate_canonical_tag( $canonical_tag_url, $expected_domain );
+			if ( false !== $validated_canonical ) {
+				$url = $validated_canonical;
 			}
 		}
 
@@ -228,7 +265,7 @@ class Shaheen_URL_Filter {
 		}
 		$path = implode( '/', $cleaned_segments );
 
-		// Strip tracking parameters from query
+		// Strip tracking parameters while preserving meaningful query parameters
 		$clean_query = '';
 		if ( ! empty( $parsed['query'] ) ) {
 			parse_str( $parsed['query'], $query_params );
@@ -260,6 +297,37 @@ class Shaheen_URL_Filter {
 	 * @return string
 	 */
 	public static function generate_record_key( $normalized_url ) {
-		return hash( 'sha256', trim( $normalized_url ) );
+		return hash( 'sha256', trim( (string) $normalized_url ) );
+	}
+
+	/**
+	 * Check for canonical collision before inserting/updating a record.
+	 *
+	 * @param string $record_key
+	 * @param int    $exclude_id
+	 * @return bool True if collision exists, false otherwise.
+	 */
+	public static function has_canonical_collision( $record_key, $exclude_id = 0 ) {
+		global $wpdb;
+		$records_table = Shaheen_DB::get_records_table();
+
+		if ( $exclude_id > 0 ) {
+			$exists = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT COUNT(*) FROM {$records_table} WHERE record_key = %s AND id != %d",
+					$record_key,
+					$exclude_id
+				)
+			);
+		} else {
+			$exists = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT COUNT(*) FROM {$records_table} WHERE record_key = %s",
+					$record_key
+				)
+			);
+		}
+
+		return (bool) $exists;
 	}
 }

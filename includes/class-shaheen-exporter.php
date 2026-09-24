@@ -24,9 +24,8 @@ class Shaheen_Exporter {
 		global $wpdb;
 		$records_table = Shaheen_DB::get_records_table();
 
-		// Fetch records
 		$records = $wpdb->get_results(
-			"SELECT id, institution, source_domain, canonical_url, record_key, content_type, content_hash, previous_hash, status, flag_reasons, skip_reason, last_modified, last_checked, error_message FROM {$records_table} ORDER BY id ASC",
+			"SELECT id, institution, source_domain, canonical_url, record_key, content_type, language, accepted_content_hash, candidate_content_hash, previous_hash, status, flag_reasons, skip_reason, last_modified, last_checked, error_message FROM {$records_table} ORDER BY id ASC",
 			ARRAY_A
 		);
 
@@ -39,7 +38,6 @@ class Shaheen_Exporter {
 
 		$output = fopen( 'php://output', 'w' );
 
-		// CSV Header
 		fputcsv(
 			$output,
 			array(
@@ -49,7 +47,9 @@ class Shaheen_Exporter {
 				'Canonical URL',
 				'Record Key',
 				'Content Type',
-				'Current Hash (SHA-256)',
+				'Language',
+				'Accepted Baseline Hash (SHA-256)',
+				'Candidate Content Hash (SHA-256)',
 				'Previous Hash (SHA-256)',
 				'Status (Phase 1 Dry-Run)',
 				'Flag Reasons',
@@ -70,7 +70,9 @@ class Shaheen_Exporter {
 					$row['canonical_url'],
 					$row['record_key'],
 					$row['content_type'],
-					$row['content_hash'],
+					isset( $row['language'] ) ? $row['language'] : 'English',
+					$row['accepted_content_hash'],
+					$row['candidate_content_hash'],
 					$row['previous_hash'],
 					$row['status'],
 					$row['flag_reasons'],

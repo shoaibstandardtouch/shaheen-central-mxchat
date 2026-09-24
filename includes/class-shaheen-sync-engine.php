@@ -1,6 +1,6 @@
 <?php
 /**
- * Core Synchronization and Batch Processing Engine for Shaheen Central MXChat Sync
+ * Core Synchronization, Change Detection & Batch Processing Engine
  *
  * @package ShaheenCentralMXChatSync
  */
@@ -12,7 +12,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Shaheen_Sync_Engine {
 
 	const LOCK_TRANSIENT = 'shaheen_sync_lock';
-	const PROGRESS_OPTION = 'shaheen_sync_progress';
 
 	/**
 	 * Build standardized source context header.
@@ -22,20 +21,22 @@ class Shaheen_Sync_Engine {
 	 * @param string $canonical_url
 	 * @param string $content_type
 	 * @param string $last_modified
+	 * @param string $language
 	 * @return string
 	 */
-	public static function format_source_context( $institution, $domain, $canonical_url, $content_type, $last_modified = '' ) {
-		$context  = "Institution: " . trim( $institution ) . "\n";
-		$context .= "Source website: " . trim( $domain ) . "\n";
-		$context .= "Original URL: " . trim( $canonical_url ) . "\n";
-		$context .= "Content type: " . trim( $content_type ) . "\n";
-		$context .= "Last modified: " . ( ! empty( $last_modified ) ? trim( $last_modified ) : 'Unknown' ) . "\n\n";
+	public static function format_source_context( $institution, $domain, $canonical_url, $content_type, $last_modified = '', $language = 'English' ) {
+		$context  = "Institution: " . trim( (string) $institution ) . "\n";
+		$context .= "Source website: " . trim( (string) $domain ) . "\n";
+		$context .= "Original URL: " . trim( (string) $canonical_url ) . "\n";
+		$context .= "Content type: " . trim( (string) $content_type ) . "\n";
+		$context .= "Last modified: " . ( ! empty( $last_modified ) ? trim( (string) $last_modified ) : 'Unknown' ) . "\n";
+		$context .= "Language: " . ( ! empty( $language ) ? trim( (string) $language ) : 'English' ) . "\n\n";
 
 		return $context;
 	}
 
 	/**
-	 * Acquire lock to prevent overlapping sync operations.
+	 * Acquire lock to prevent overlapping sync runs.
 	 *
 	 * @param int $duration_seconds
 	 * @return bool
@@ -43,13 +44,12 @@ class Shaheen_Sync_Engine {
 	public static function acquire_lock( $duration_seconds = 900 ) {
 		$existing = get_transient( self::LOCK_TRANSIENT );
 		if ( $existing ) {
-			// Check if stale (older than duration_seconds)
 			$lock_time = absint( $existing );
 			if ( time() - $lock_time > $duration_seconds ) {
 				Shaheen_Logger::warning( 'Releasing stale synchronization lock.' );
 				self::release_lock();
 			} else {
-				return false; // Still active
+				return false;
 			}
 		}
 
@@ -65,7 +65,7 @@ class Shaheen_Sync_Engine {
 	}
 
 	/**
-	 * Run crawl and discovery for all enabled sources or a specific source.
+	 * Run sitemap discovery for all approved/enabled sources or a single source.
 	 *
 	 * @param int $source_id Optional single source ID.
 	 * @return array
@@ -78,122 +78,241 @@ class Shaheen_Sync_Engine {
 			);
 		}
 
-		Shaheen_Logger::info( 'Started sitemap discovery run.' );
+		try {
+			Shaheen_Logger::info( 'Started sitemap discovery run.' );
 
-		if ( $source_id > 0 ) {
-			$sources = array( Shaheen_Source_Manager::get_source( $source_id ) );
-		} else {
-			$sources = Shaheen_Source_Manager::get_enabled_sources();
-		}
-
-		$total_discovered = 0;
-		$total_skipped    = 0;
-
-		foreach ( $sources as $source ) {
-			if ( empty( $source ) || (int) $source['is_enabled'] !== 1 ) {
-				continue;
+			if ( $source_id > 0 ) {
+				$sources = array( Shaheen_Source_Manager::get_source( $source_id ) );
+			} else {
+				$sources = Shaheen_Source_Manager::get_sync_eligible_sources();
 			}
 
-			$crawl_res = Shaheen_Crawler::crawl_source_sitemap( $source );
-			if ( ! empty( $crawl_res['success'] ) ) {
-				$total_discovered += $crawl_res['discovered'];
-				$total_skipped    += $crawl_res['skipped'];
+			$total_discovered = 0;
+			$total_queued     = 0;
+			$total_skipped    = 0;
+			$total_missing    = 0;
+
+			foreach ( $sources as $source ) {
+				if ( empty( $source ) || (int) $source['is_enabled'] !== 1 || $source['status'] !== 'approved' ) {
+					continue;
+				}
+
+				$crawl_res = Shaheen_Crawler::crawl_source_sitemap( $source );
+				if ( ! empty( $crawl_res['success'] ) ) {
+					$total_discovered += $crawl_res['discovered'];
+					$total_queued     += $crawl_res['queued'];
+					$total_skipped    += $crawl_res['skipped'];
+					$total_missing    += $crawl_res['missing'];
+				}
 			}
+
+			update_option( 'shaheen_sync_last_run', time() );
+
+			return array(
+				'success'    => true,
+				'discovered' => $total_discovered,
+				'queued'     => $total_queued,
+				'skipped'    => $total_skipped,
+				'missing'    => $total_missing,
+				'message'    => sprintf(
+					/* translators: 1: new discovered, 2: queued check, 3: skipped */
+					__( 'Sitemap crawl complete. Discovered: %1$d, Re-check queued: %2$d, Skipped: %3$d', 'shaheen-central-mxchat-sync' ),
+					$total_discovered,
+					$total_queued,
+					$total_skipped
+				),
+			);
+		} finally {
+			self::release_lock();
 		}
-
-		update_option( 'shaheen_sync_last_run', time() );
-		self::release_lock();
-
-		return array(
-			'success'    => true,
-			'discovered' => $total_discovered,
-			'skipped'    => $total_skipped,
-			'message'    => sprintf(
-				/* translators: 1: discovered count, 2: skipped count */
-				__( 'Sitemap crawl complete. Discovered: %1$d, Skipped: %2$d', 'shaheen-central-mxchat-sync' ),
-				$total_discovered,
-				$total_skipped
-			),
-		);
 	}
 
 	/**
-	 * Process a batch of discovered or pending pages.
+	 * Process a controlled batch of discovered or queued_check records.
+	 * Enforces maximum pages per run and prevents repeated loops.
 	 *
 	 * @param int $batch_size
+	 * @param int $max_pages
 	 * @return array
 	 */
-	public static function process_batch( $batch_size = 0 ) {
+	public static function process_batch( $batch_size = 0, $max_pages = 0 ) {
 		global $wpdb;
 		$records_table = Shaheen_DB::get_records_table();
+		$runs_table    = Shaheen_DB::get_runs_table();
 
 		if ( ! self::acquire_lock() ) {
 			return array(
 				'success' => false,
-				'message' => __( 'Sync is currently locked by an active process.', 'shaheen-central-mxchat-sync' ),
+				'message' => __( 'Sync is currently locked by another active process.', 'shaheen-central-mxchat-sync' ),
 				'done'    => false,
 			);
 		}
 
-		if ( $batch_size <= 0 ) {
-			$batch_size = absint( get_option( 'shaheen_sync_batch_size', 10 ) );
-		}
+		try {
+			if ( $batch_size <= 0 ) {
+				$batch_size = absint( get_option( 'shaheen_sync_batch_size', 10 ) );
+			}
+			if ( $max_pages <= 0 ) {
+				$max_pages = absint( get_option( 'shaheen_sync_max_pages_per_sync', 100 ) );
+			}
 
-		// Fetch records that need fetching: status = 'discovered' or status = 'needs_review' or newly queued
-		$records = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT * FROM {$records_table} WHERE status = %s OR status = %s ORDER BY id ASC LIMIT %d",
-				'discovered',
-				'needs_review',
-				$batch_size
-			),
-			ARRAY_A
-		);
+			// Track active run progress
+			$active_run = get_option( 'shaheen_sync_current_run', null );
+			if ( ! $active_run ) {
+				$run_id = 'run_' . gmdate( 'Ymd_His' ) . '_' . wp_generate_password( 6, false );
+				$active_run = array(
+					'run_id'          => $run_id,
+					'processed_pages' => 0,
+					'maximum_pages'   => $max_pages,
+					'started_at'      => current_time( 'mysql' ),
+				);
+				$wpdb->insert(
+					$runs_table,
+					array(
+						'run_id'          => $run_id,
+						'run_type'        => 'manual',
+						'started_at'      => current_time( 'mysql' ),
+						'status'          => 'running',
+						'maximum_pages'   => $max_pages,
+						'processed_pages' => 0,
+					),
+					array( '%s', '%s', '%s', '%s', '%d', '%d' )
+				);
+			}
 
-		if ( empty( $records ) ) {
-			self::release_lock();
-			return array(
-				'success'   => true,
-				'processed' => 0,
-				'remaining' => 0,
-				'done'      => true,
-				'message'   => __( 'All discovered pages have been analyzed.', 'shaheen-central-mxchat-sync' ),
+			// Check if maximum run limit is already reached
+			if ( $active_run['processed_pages'] >= $active_run['maximum_pages'] ) {
+				$wpdb->update(
+					$runs_table,
+					array(
+						'status'       => 'limit_reached',
+						'completed_at' => current_time( 'mysql' ),
+					),
+					array( 'run_id' => $active_run['run_id'] ),
+					array( '%s', '%s' ),
+					array( '%s' )
+				);
+				delete_option( 'shaheen_sync_current_run' );
+
+				return array(
+					'success'       => true,
+					'processed'     => 0,
+					'remaining'     => 0,
+					'done'          => true,
+					'limit_reached' => true,
+					'message'       => __( 'Maximum pages for this run reached. Remaining pages will be processed in a future run.', 'shaheen-central-mxchat-sync' ),
+				);
+			}
+
+			// Select ONLY 'discovered' and 'queued_check' records!
+			// Never automatically select needs_review, pending_review, unchanged, skipped, rejected, imported, error!
+			$records = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT * FROM {$records_table} WHERE status = %s OR status = %s ORDER BY id ASC LIMIT %d",
+					'discovered',
+					'queued_check',
+					$batch_size
+				),
+				ARRAY_A
 			);
+
+			if ( empty( $records ) ) {
+				$wpdb->update(
+					$runs_table,
+					array(
+						'status'       => 'completed',
+						'completed_at' => current_time( 'mysql' ),
+					),
+					array( 'run_id' => $active_run['run_id'] ),
+					array( '%s', '%s' ),
+					array( '%s' )
+				);
+				delete_option( 'shaheen_sync_current_run' );
+
+				return array(
+					'success'       => true,
+					'processed'     => 0,
+					'remaining'     => 0,
+					'done'          => true,
+					'limit_reached' => false,
+					'message'       => __( 'All discovered pages have been analyzed.', 'shaheen-central-mxchat-sync' ),
+				);
+			}
+
+			$processed_in_batch = 0;
+			foreach ( $records as $record ) {
+				self::process_single_record( $record );
+				$processed_in_batch++;
+				$active_run['processed_pages']++;
+
+				if ( $active_run['processed_pages'] >= $active_run['maximum_pages'] ) {
+					break;
+				}
+			}
+
+			// Update persistent run record
+			$wpdb->update(
+				$runs_table,
+				array( 'processed_pages' => $active_run['processed_pages'] ),
+				array( 'run_id' => $active_run['run_id'] ),
+				array( '%d' ),
+				array( '%s' )
+			);
+
+			$limit_reached = ( $active_run['processed_pages'] >= $active_run['maximum_pages'] );
+			if ( $limit_reached ) {
+				$wpdb->update(
+					$runs_table,
+					array(
+						'status'       => 'limit_reached',
+						'completed_at' => current_time( 'mysql' ),
+					),
+					array( 'run_id' => $active_run['run_id'] ),
+					array( '%s', '%s' ),
+					array( '%s' )
+				);
+				delete_option( 'shaheen_sync_current_run' );
+			} else {
+				update_option( 'shaheen_sync_current_run', $active_run );
+			}
+
+			// Count remaining eligible records
+			$remaining = (int) $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT COUNT(*) FROM {$records_table} WHERE status = %s OR status = %s",
+					'discovered',
+					'queued_check'
+				)
+			);
+
+			$done = ( $remaining === 0 || $limit_reached );
+
+			$message = $limit_reached
+				? __( 'Maximum pages for this run reached. Remaining pages will be processed in a future run.', 'shaheen-central-mxchat-sync' )
+				: sprintf(
+					/* translators: 1: batch count, 2: total run count, 3: remaining */
+					__( 'Analyzed %1$d pages (%2$d total this run). %3$d remaining.', 'shaheen-central-mxchat-sync' ),
+					$processed_in_batch,
+					$active_run['processed_pages'],
+					$remaining
+				);
+
+			return array(
+				'success'       => true,
+				'processed'     => $processed_in_batch,
+				'total_run'     => $active_run['processed_pages'],
+				'remaining'     => $remaining,
+				'done'          => $done,
+				'limit_reached' => $limit_reached,
+				'message'       => $message,
+			);
+		} finally {
+			self::release_lock();
 		}
-
-		$processed = 0;
-
-		foreach ( $records as $record ) {
-			self::process_single_record( $record );
-			$processed++;
-		}
-
-		$remaining = (int) $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT COUNT(*) FROM {$records_table} WHERE status = %s OR status = %s",
-				'discovered',
-				'needs_review'
-			)
-		);
-
-		self::release_lock();
-
-		return array(
-			'success'   => true,
-			'processed' => $processed,
-			'remaining' => $remaining,
-			'done'      => ( $remaining === 0 ),
-			'message'   => sprintf(
-				/* translators: 1: processed in batch, 2: remaining items */
-				__( 'Processed %1$d pages in batch. %2$d remaining.', 'shaheen-central-mxchat-sync' ),
-				$processed,
-				$remaining
-			),
-		);
 	}
 
 	/**
-	 * Process and analyze a single record.
+	 * Process and analyze a single record using Continuous Website Change Detection.
 	 *
 	 * @param array $record
 	 * @return bool
@@ -205,7 +324,7 @@ class Shaheen_Sync_Engine {
 		$url    = $record['canonical_url'];
 		$domain = $record['source_domain'];
 
-		// 1. Fetch page safely
+		// 1. Safe fetch with controlled redirects and anti-SSRF
 		$fetch_result = Shaheen_Page_Fetcher::fetch( $url, $domain );
 
 		if ( ! $fetch_result['success'] ) {
@@ -231,8 +350,28 @@ class Shaheen_Sync_Engine {
 		// 2. Extract and clean content
 		$extracted = Shaheen_Content_Extractor::extract( $html, $url );
 
-		// Check if canonical URL was updated by <link rel="canonical">
-		$canonical_url = Shaheen_URL_Filter::normalize_url( $url, $extracted['canonical_url'] );
+		// Validate canonical tag
+		$validated_canonical = Shaheen_URL_Filter::validate_canonical_tag( $extracted['canonical_url'], $domain );
+		$canonical_url = $validated_canonical ? Shaheen_URL_Filter::normalize_url( $validated_canonical, '', $domain ) : $url;
+
+		// Canonical collision check: if canonical URL resolves to another existing record, handle safely
+		$new_record_key = Shaheen_URL_Filter::generate_record_key( $canonical_url );
+		if ( $new_record_key !== $record['record_key'] && Shaheen_URL_Filter::has_canonical_collision( $new_record_key, $record['id'] ) ) {
+			// Mark this duplicate URL as skipped with collision reason
+			$wpdb->update(
+				$records_table,
+				array(
+					'status'       => 'skipped',
+					'skip_reason'  => 'Canonical collision with existing record key',
+					'last_checked' => current_time( 'mysql' ),
+					'updated_at'   => current_time( 'mysql' ),
+				),
+				array( 'id' => $record['id'] ),
+				array( '%s', '%s', '%s', '%s' ),
+				array( '%d' )
+			);
+			return true;
+		}
 
 		// 3. Classify content
 		$content_type = Shaheen_Classifier::classify(
@@ -243,23 +382,24 @@ class Shaheen_Sync_Engine {
 			$record['source_sitemap']
 		);
 
-		// 4. Build source context header and final content
+		// 4. Build source context header
 		$source_context = self::format_source_context(
 			$record['institution'],
 			$record['source_domain'],
 			$canonical_url,
 			$content_type,
-			$extracted['last_modified'] ? $extracted['last_modified'] : $record['last_modified']
+			$extracted['last_modified'] ? $extracted['last_modified'] : $record['last_modified'],
+			$record['language']
 		);
 
-		// Cleaned content with source context
-		$full_cleaned_content = $source_context . $extracted['cleaned_text'];
+		// Full cleaned candidate text with source context
+		$candidate_text = $source_context . $extracted['cleaned_text'];
 
-		// 5. Generate SHA-256 Hash of cleaned text + source context
-		$new_hash = hash( 'sha256', trim( $full_cleaned_content ) );
-		$old_hash = ! empty( $record['content_hash'] ) ? $record['content_hash'] : '';
+		// 5. Generate SHA-256 hash of cleaned text + source context (never raw HTML)
+		$candidate_hash = hash( 'sha256', trim( (string) $candidate_text ) );
+		$accepted_hash  = ! empty( $record['accepted_content_hash'] ) ? $record['accepted_content_hash'] : '';
 
-		// 6. Determine Record Status (Phase 1 Rules)
+		// 6. State Machine & Continuous Change Detection Rules
 		$status = 'new';
 		$flag_reasons = array();
 
@@ -269,52 +409,58 @@ class Shaheen_Sync_Engine {
 			$flag_reasons[] = 'Insufficient main content detected (< 30 words)';
 		}
 
-		// Check sensitive content flags
+		// Check sensitive content
 		if ( ! empty( $extracted['sensitive_flags'] ) ) {
 			$status = 'pending_review';
 			$flag_reasons[] = 'Sensitive terms detected: ' . implode( ', ', $extracted['sensitive_flags'] );
 		}
 
-		// Compare hashes if previously recorded
-		if ( ! empty( $old_hash ) ) {
-			if ( $old_hash === $new_hash ) {
-				$status = 'unchanged';
+		$update_data = array(
+			'canonical_url'          => $canonical_url,
+			'record_key'             => $new_record_key,
+			'candidate_content_hash' => $candidate_hash,
+			'candidate_content'      => $candidate_text,
+			'content_type'           => $content_type,
+			'title'                  => sanitize_text_field( $extracted['title'] ),
+			'last_modified'          => $extracted['last_modified'] ? $extracted['last_modified'] : $record['last_modified'],
+			'last_checked'           => current_time( 'mysql' ),
+			'candidate_checked_at'   => current_time( 'mysql' ),
+			'error_message'          => null,
+			'updated_at'             => current_time( 'mysql' ),
+		);
+
+		if ( empty( $accepted_hash ) ) {
+			// Brand new URL: store candidate values; status: new / needs_review / pending_review
+			$update_data['status']       = $status;
+			$update_data['flag_reasons'] = ! empty( $flag_reasons ) ? implode( '; ', $flag_reasons ) : null;
+		} else {
+			// Existing URL with accepted baseline:
+			if ( $accepted_hash === $candidate_hash ) {
+				// Same hash: unchanged
+				$update_data['status']       = 'unchanged';
+				$update_data['flag_reasons'] = null;
 			} else {
-				$status = 'pending_review';
-				$flag_reasons[] = 'Content has changed since previous crawl';
+				// Changed hash: PRESERVE accepted content & accepted hash!
+				// Store new content separately as candidate content
+				$update_data['status']        = 'pending_review';
+				$update_data['previous_hash'] = $accepted_hash;
+				$flag_reasons[]               = 'Content changed since previous acceptance';
+				$update_data['flag_reasons']  = implode( '; ', $flag_reasons );
 			}
 		}
-
-		// 7. Update database record
-		$update_data = array(
-			'canonical_url'   => $canonical_url,
-			'content_hash'    => $new_hash,
-			'previous_hash'   => ( $old_hash && $old_hash !== $new_hash ) ? $old_hash : $record['previous_hash'],
-			'content_type'    => $content_type,
-			'title'           => sanitize_text_field( $extracted['title'] ),
-			'cleaned_content' => $full_cleaned_content,
-			'flag_reasons'    => ! empty( $flag_reasons ) ? implode( '; ', $flag_reasons ) : null,
-			'last_modified'   => $extracted['last_modified'] ? $extracted['last_modified'] : $record['last_modified'],
-			'last_checked'    => current_time( 'mysql' ),
-			'status'          => $status,
-			'error_message'   => null,
-			'updated_at'      => current_time( 'mysql' ),
-		);
 
 		$wpdb->update(
 			$records_table,
 			$update_data,
-			array( 'id' => $record['id'] ),
-			array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ),
-			array( '%d' )
+			array( 'id' => $record['id'] )
 		);
 
-		Shaheen_Logger::info( "Processed URL: {$canonical_url} [{$status}]" );
+		Shaheen_Logger::info( "Processed URL: {$canonical_url} [{$update_data['status']}]" );
 		return true;
 	}
 
 	/**
-	 * Retry a specific URL by record ID.
+	 * Re-check a single record on demand.
 	 *
 	 * @param int $record_id
 	 * @return array
@@ -336,29 +482,6 @@ class Shaheen_Sync_Engine {
 			);
 		}
 
-		// Re-evaluate URL skip filters first
-		$skip_reason = Shaheen_URL_Filter::should_skip_url( $record['canonical_url'], $record['source_domain'] );
-		if ( false !== $skip_reason ) {
-			$wpdb->update(
-				$records_table,
-				array(
-					'status'        => 'skipped',
-					'skip_reason'   => $skip_reason,
-					'last_checked'  => current_time( 'mysql' ),
-					'updated_at'    => current_time( 'mysql' ),
-				),
-				array( 'id' => $record_id ),
-				array( '%s', '%s', '%s', '%s' ),
-				array( '%d' )
-			);
-
-			return array(
-				'success' => true,
-				'status'  => 'skipped',
-				'message' => __( 'URL re-checked and marked as skipped: ', 'shaheen-central-mxchat-sync' ) . $skip_reason,
-			);
-		}
-
 		$success = self::process_single_record( $record );
 		$updated_record = $wpdb->get_row(
 			$wpdb->prepare( "SELECT * FROM {$records_table} WHERE id = %d", $record_id ),
@@ -368,7 +491,7 @@ class Shaheen_Sync_Engine {
 		return array(
 			'success' => $success,
 			'status'  => $updated_record ? $updated_record['status'] : 'unknown',
-			'message' => $success ? __( 'Record successfully re-processed.', 'shaheen-central-mxchat-sync' ) : __( 'Record processing encountered an error.', 'shaheen-central-mxchat-sync' ),
+			'message' => $success ? __( 'Record successfully re-checked.', 'shaheen-central-mxchat-sync' ) : __( 'Record processing encountered an error.', 'shaheen-central-mxchat-sync' ),
 		);
 	}
 }

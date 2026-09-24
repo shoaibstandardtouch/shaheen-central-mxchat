@@ -12,7 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Shaheen_Activator {
 
 	/**
-	 * Run activation logic: database migration, default settings, seed initial source, schedule cron.
+	 * Run activation logic: database migrations, default settings, seed initial source, schedule cron.
 	 */
 	public static function activate() {
 		// 1. Create or upgrade database tables
@@ -44,6 +44,6 @@ class Shaheen_Activator {
 		// 4. Schedule daily WP-Cron
 		Shaheen_Cron::schedule_event();
 
-		Shaheen_Logger::info( 'Shaheen Central MXChat Sync (Phase 1) activated successfully.' );
+		Shaheen_Logger::info( 'Shaheen Central MXChat Sync activated successfully (Phase 1).' );
 	}
 }
